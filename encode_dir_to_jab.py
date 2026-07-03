@@ -6,10 +6,14 @@
 .go .rs .swift .kt .m .mm .cs .php .rb .sh .bat
 
 参数：
-    --input     源码根目录
-    --output    输出根目录（默认 ./jab_out_dir）
-    --writer    jabcodeWriter 路径（可选）
-    --ext       额外扩展名列表，用逗号分隔（可选）
+    --input        源码根目录
+    --output       输出根目录（默认 ./jab_out_dir）
+    --writer       jabcodeWriter 路径（可选）
+    --module-size  模块尺寸（默认 16）
+    --ecc-level    纠错等级（默认 4）
+    --border       边框宽度像素（默认 0）
+    --border-color 边框颜色（默认 white）
+    --ext          额外扩展名列表，用逗号分隔（可选）
 """
 
 import argparse
@@ -55,6 +59,29 @@ def main() -> int:
     parser.add_argument("--input", required=True, help="源码根目录")
     parser.add_argument("--output", default="jab_out_dir", help="输出根目录")
     parser.add_argument("--writer", type=Path, help="jabcodeWriter 路径（可选）")
+    parser.add_argument(
+        "--module-size",
+        type=int,
+        default=16,
+        help="模块尺寸（默认 16，设为 8 可得到宽高各一半的 PNG）",
+    )
+    parser.add_argument(
+        "--ecc-level",
+        type=int,
+        default=4,
+        help="纠错等级（默认 4，范围 1-10，越高越抗错但容量越小）",
+    )
+    parser.add_argument(
+        "--border",
+        type=int,
+        default=0,
+        help="在 PNG 四周添加的边框宽度（像素，默认 0）",
+    )
+    parser.add_argument(
+        "--border-color",
+        default="white",
+        help="边框颜色（默认 white，支持颜色名或 #RRGGBB）",
+    )
     parser.add_argument(
         "--ext",
         help="额外扩展名列表，用逗号分隔，例如 .vue,.sql（可选，大小写不敏感）",
@@ -111,6 +138,10 @@ def main() -> int:
         ]
         if args.writer:
             cmd.extend(["--writer", str(args.writer)])
+        cmd.extend(["--module-size", str(args.module_size)])
+        cmd.extend(["--ecc-level", str(args.ecc_level)])
+        cmd.extend(["--border", str(args.border)])
+        cmd.extend(["--border-color", str(args.border_color)])
 
         result = subprocess.run(cmd)
         if result.returncode == 0:

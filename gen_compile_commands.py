@@ -8,12 +8,13 @@ import json
 import shlex
 import subprocess
 from pathlib import Path
+from typing import Dict, List, Optional
 
 REPO_ROOT = Path(__file__).resolve().parent
 SUBDIRS = ["src/jabcode", "src/jabcodeWriter", "src/jabcodeReader"]
 
 
-def find_source_after_c(tokens: list[str]) -> str | None:
+def find_source_after_c(tokens: List[str]) -> Optional[str]:
     """在命令行 tokens 中找到 -c 后面的源文件名（跳过选项）。"""
     for i, tok in enumerate(tokens):
         if tok == "-c" and i + 1 < len(tokens):
@@ -23,8 +24,8 @@ def find_source_after_c(tokens: list[str]) -> str | None:
     return None
 
 
-def generate() -> list[dict]:
-    entries: list[dict] = []
+def generate() -> List[Dict]:
+    entries: List[Dict] = []
 
     for sub in SUBDIRS:
         cwd = (REPO_ROOT / sub).resolve()

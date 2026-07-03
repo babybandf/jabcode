@@ -37,11 +37,11 @@ def main() -> int:
         print(f"错误：找不到 {decode_script}", file=sys.stderr)
         return 1
 
-    # 所有包含 page_*.png 的目录即一个源码文件的编码目录
-    png_files = in_root.rglob("page_*.png")
+    # 所有包含 .png 的目录即一个源码文件的编码目录
+    png_files = in_root.rglob("*.png")
     encoded_dirs = sorted({p.parent for p in png_files})
     if not encoded_dirs:
-        print(f"错误：未找到 page_*.png：{in_root}", file=sys.stderr)
+        print(f"错误：未找到 PNG 图片：{in_root}", file=sys.stderr)
         return 1
 
     success = 0

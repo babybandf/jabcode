@@ -18,6 +18,9 @@ import sys
 import tempfile
 import zlib
 from pathlib import Path
+from typing import List, Optional, Tuple
+
+from PIL import Image, ImageEnhance, ImageFilter
 
 PAGE_MAGIC = b"JABP"
 GLOBAL_MAGIC = b"JAB0"
@@ -29,24 +32,74 @@ def find_default_reader() -> Path:
     return repo_root / "src" / "jabcodeReader" / "bin" / "jabcodeReader"
 
 
-def decode_png(png_path: Path, reader: Path) -> bytes:
-    """调用 jabcodeReader 解码单张 PNG，返回原始二进制包。"""
+def _try_decode_raw(png_path: Path, reader: Path) -> Optional[bytes]:
+    """直接调用 jabcodeReader 解码，成功返回数据，失败返回 None。"""
     with tempfile.NamedTemporaryFile(delete=False, suffix=".bin") as tmp:
         out_path = tmp.name
     try:
         cmd = [str(reader), str(png_path), "--output", out_path]
         result = subprocess.run(cmd, capture_output=True, text=True)
         if result.returncode != 0:
-            raise RuntimeError(
-                f"解码失败：{png_path}\n{result.stderr or result.stdout}"
-            )
+            return None
         return Path(out_path).read_bytes()
     finally:
         if os.path.exists(out_path):
             os.remove(out_path)
 
 
-def parse_page_packet(packet: bytes) -> tuple[int, int, bytes]:
+def _preprocess_variants(png_path: Path) -> List[Path]:
+    """生成几种预处理后的临时 PNG，用于增强截图解码成功率。"""
+    img = Image.open(png_path).convert("RGB")
+    variants: List[Path] = []
+    base = Path(tempfile.gettempdir()) / f"jab_decode_{png_path.stem}"
+
+    # 1. 锐化
+    sharp = img.filter(ImageFilter.SHARPEN)
+    p = Path(f"{base}_sharp.png")
+    sharp.save(p)
+    variants.append(p)
+
+    # 2. 2 倍放大 + 锐化
+    up = img.resize((img.width * 2, img.height * 2), Image.LANCZOS)
+    up_sharp = up.filter(ImageFilter.SHARPEN)
+    p = Path(f"{base}_up2x_sharp.png")
+    up_sharp.save(p)
+    variants.append(p)
+
+    # 3. 对比度增强
+    enhancer = ImageEnhance.Contrast(img)
+    contrast = enhancer.enhance(1.5)
+    p = Path(f"{base}_contrast.png")
+    contrast.save(p)
+    variants.append(p)
+
+    return variants
+
+
+def decode_png(png_path: Path, reader: Path, auto_preprocess: bool = True) -> bytes:
+    """调用 jabcodeReader 解码单张 PNG，返回原始二进制包。"""
+    data = _try_decode_raw(png_path, reader)
+    if data is not None:
+        return data
+
+    if not auto_preprocess:
+        raise RuntimeError(f"解码失败：{png_path}")
+
+    # 直接失败时，尝试预处理
+    variants = _preprocess_variants(png_path)
+    try:
+        for v in variants:
+            data = _try_decode_raw(v, reader)
+            if data is not None:
+                return data
+        raise RuntimeError(f"解码失败：{png_path}（已尝试锐化/放大/对比度增强）")
+    finally:
+        for v in variants:
+            if v.exists():
+                v.unlink()
+
+
+def parse_page_packet(packet: bytes) -> Tuple[int, int, bytes]:
     """
     解析一页二进制包，返回 (index, total, payload)。
     校验 Magic、长度、CRC32。
@@ -72,7 +125,7 @@ def parse_page_packet(packet: bytes) -> tuple[int, int, bytes]:
     return index, total, payload
 
 
-def parse_global_header(data: bytes) -> tuple[str, int, bytes, bytes]:
+def parse_global_header(data: bytes) -> Tuple[str, int, bytes, bytes]:
     """
     解析全局头，返回 (filename, original_size, sha256, remaining_data)。
     """
@@ -101,6 +154,11 @@ def main() -> int:
     parser.add_argument("--input", required=True, help="包含 PNG 的目录")
     parser.add_argument("--output", help="输出文件路径（默认使用全局头中的文件名）")
     parser.add_argument("--reader", type=Path, help="jabcodeReader 路径")
+    parser.add_argument(
+        "--no-preprocess",
+        action="store_true",
+        help="关闭截图自动预处理（默认开启）",
+    )
     args = parser.parse_args()
 
     in_dir = Path(args.input)
@@ -117,16 +175,20 @@ def main() -> int:
         )
         return 1
 
-    png_files = sorted(in_dir.glob("page_*.png"))
+    png_files = sorted(
+        p
+        for p in in_dir.glob("*.png")
+        if not any(s in p.stem for s in ("_sharp", "_up2x", "_contrast"))
+    )
     if not png_files:
-        print(f"错误：目录中没有 page_*.png：{in_dir}", file=sys.stderr)
+        print(f"错误：目录中没有 PNG 图片：{in_dir}", file=sys.stderr)
         return 1
 
     print(f"发现 {len(png_files)} 张图片，开始解码...")
 
-    pages: list[tuple[int, int, bytes]] = []
+    pages: List[Tuple[int, int, bytes]] = []
     for png in png_files:
-        packet = decode_png(png, reader)
+        packet = decode_png(png, reader, auto_preprocess=not args.no_preprocess)
         index, total, payload = parse_page_packet(packet)
         pages.append((index, total, payload))
         print(f"  {png.name} -> 页 {index + 1}/{total}")
